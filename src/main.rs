@@ -17,6 +17,7 @@ pub struct Job {
     task: Arc<dyn Fn() + Send + Sync>,
     last_run: Option<DateTime<Utc>>,
     weekday: Option<Weekday>,
+    remaining_runs: Option<i32>,
 }
 
 pub struct Scheduler {
@@ -35,6 +36,7 @@ impl Scheduler {
             time_unit: None,
             at_time: None,
             weekday: None,
+            repeat: None,
         }
     }
 }
@@ -45,6 +47,7 @@ pub struct JobBuilder<'a> {
     at_time: Option<NaiveTime>,
     scheduler: &'a mut Scheduler,
     weekday: Option<Weekday>,
+    repeat: Option<i32>,
 }
 
 impl<'a> JobBuilder<'a> {
@@ -112,6 +115,10 @@ impl<'a> JobBuilder<'a> {
         self.weekday = Some(Weekday::Sun);
         self
     }
+    pub fn repeat(mut self, count: i32) -> Self {
+        self.repeat = Some(count);
+        self
+    }
 
     pub fn do_<F>(self, job_fn: F)
     where
@@ -124,6 +131,7 @@ impl<'a> JobBuilder<'a> {
             task: Arc::new(job_fn),
             last_run: None,
             weekday: self.weekday,
+            remaining_runs: self.repeat,
         };
         self.scheduler.jobs.push(job);
     }
@@ -133,6 +141,9 @@ impl Scheduler {
     pub fn run_pending(&mut self) {
         let now = Utc::now();
         for job in &mut self.jobs {
+            if let Some(0) = job.remaining_runs {
+                continue;
+            }
             if let Some(wanted_day) = job.weekday {
                 if now.weekday() != wanted_day {
                     continue;
@@ -174,6 +185,9 @@ impl Scheduler {
 
                 (job.task)();
                 job.last_run = Some(now);
+                if let Some(ref mut count) = job.remaining_runs {
+                    *count -= 1;
+                }
             }
         }
     }
@@ -182,22 +196,28 @@ impl Scheduler {
 fn main() {
     let mut scheduler = Scheduler::new();
 
+    //scheduler
+    //    .every(3)
+    //    .seconds()
+    //    .do_(|| println!("task scheduled"));
+
+    //scheduler
+    //    .every(1)
+    //    .days()
+    //    .at("19:24")
+    //    .do_(|| println!("task scheduled"));
+    //
+    //scheduler
+    //    .every(1)
+    //    .week()
+    //    .tuesday()
+    //    .at("19:24")
+    //    .do_(|| println!("task scheduled"));
+    //
     scheduler
         .every(3)
         .seconds()
-        .do_(|| println!("task scheduled"));
-
-    scheduler
-        .every(1)
-        .days()
-        .at("19:24")
-        .do_(|| println!("task scheduled"));
-
-    scheduler
-        .every(1)
-        .week()
-        .tuesday()
-        .at("19:24")
+        .repeat(3)
         .do_(|| println!("task scheduled"));
 
     loop {
