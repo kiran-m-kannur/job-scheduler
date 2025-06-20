@@ -78,6 +78,55 @@ impl Scheduler for Job {
     }
 }
 
+pub struct DynamicJob {
+    schedule_blocks: Vec<(NaiveTime, NaiveTime, Duration, Arc<dyn Fn() + Send + Sync>)>,
+    last_run: Option<DateTime<Utc>>,
+}
+
+impl DynamicJob {
+    pub fn new() -> Self {
+        Self {
+            schedule_blocks: vec![],
+            last_run: None,
+        }
+    }
+
+    pub fn between<F: Fn() + Send + Sync + 'static>(
+        mut self,
+        start: &str,
+        end: &str,
+        interval: Duration,
+        task: F,
+    ) -> Self {
+        let start_time = NaiveTime::parse_from_str(start, "%H:%M").unwrap();
+        let end_time = NaiveTime::parse_from_str(end, "%H:%M").unwrap();
+        self.schedule_blocks
+            .push((start_time, end_time, interval, Arc::new(task)));
+        self
+    }
+}
+
+impl Scheduler for DynamicJob {
+    fn run_if_due(&mut self, now: DateTime<Utc>) {
+        let now_time = now.time();
+
+        for (start, end, interval, task) in &self.schedule_blocks {
+            if &now_time >= start && &now_time < end {
+                let should_run = match self.last_run {
+                    None => true,
+                    Some(last) => now - last >= *interval,
+                };
+
+                if should_run {
+                    task();
+                    self.last_run = Some(now);
+                }
+                break;
+            }
+        }
+    }
+}
+
 pub struct JobRunner {
     jobs: Vec<Box<dyn Scheduler>>,
 }
@@ -202,6 +251,16 @@ fn main() {
         .seconds()
         .repeat(3)
         .do_(|| println!("task scheduled"));
+
+    runner.jobs.push(Box::new(
+        DynamicJob::new()
+            .between("00:00", "22:00", Duration::hours(1), || {
+                println!(" hourly task")
+            })
+            .between("22:00", "23:00", Duration::minutes(1), || {
+                println!(" minute task")
+            }),
+    ));
 
     loop {
         runner.run_pending();
